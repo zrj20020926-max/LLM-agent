@@ -27,6 +27,9 @@
           <h1>前端学习助手</h1>
           <p>在线 · Vue3 / Vite / 前端工程化</p>
         </div>
+        <span class="backend-status" :class="healthStatus">
+          {{ healthStatusText }}
+        </span>
       </header>
 
       <div class="message-list">
@@ -59,9 +62,11 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { getHealth } from '../api/health'
 
 const inputText = ref('')
+const healthStatus = ref('loading')
 
 const sessions = [
   {
@@ -98,4 +103,25 @@ const messages = [
 ]
 
 const isSendDisabled = computed(() => inputText.value.trim().length === 0)
+
+const healthStatusText = computed(() => {
+  if (healthStatus.value === 'success') {
+    return '后端连接成功'
+  }
+
+  if (healthStatus.value === 'error') {
+    return '后端连接失败'
+  }
+
+  return '正在连接后端...'
+})
+
+onMounted(async () => {
+  try {
+    await getHealth()
+    healthStatus.value = 'success'
+  } catch (error) {
+    healthStatus.value = 'error'
+  }
+})
 </script>
