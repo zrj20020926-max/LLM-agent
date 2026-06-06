@@ -1,7 +1,7 @@
 import { request } from './request'
 
 const getHealth = () => {
-  request('/health')  
+  return request('/health')
 }
 
 export { getHealth }

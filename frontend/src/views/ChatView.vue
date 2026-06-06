@@ -3,38 +3,69 @@
     <aside class="session-sidebar">
       <div class="brand">AgentDesk</div>
 
-      <el-button class="new-session-button" type="primary" plain>
+      <el-button
+        class="new-session-button"
+        type="primary"
+        plain
+        :loading="chatStore.loading"
+        @click="handleCreateConversation"
+      >
         新建会话
       </el-button>
 
       <nav class="session-list" aria-label="会话列表">
         <button
-          v-for="session in sessions"
-          :key="session.id"
+          v-for="conversation in chatStore.conversations"
+          :key="conversation.id"
           class="session-item"
-          :class="{ active: session.active }"
+          :class="{ active: conversation.id === chatStore.currentConversationId }"
           type="button"
+          @click="chatStore.selectConversation(conversation.id)"
         >
-          <span class="session-title">{{ session.title }}</span>
-          <span class="session-desc">{{ session.desc }}</span>
+          <span class="session-copy">
+            <span class="session-title">{{ conversation.title }}</span>
+            <span class="session-desc">{{ formatDate(conversation.updated_at) }}</span>
+          </span>
+          <span
+            class="session-delete"
+            role="button"
+            tabindex="0"
+            title="删除会话"
+            @click.stop="handleDeleteConversation(conversation.id)"
+            @keydown.enter.stop="handleDeleteConversation(conversation.id)"
+          >
+            ×
+          </span>
         </button>
+
+        <p v-if="!chatStore.loading && chatStore.conversations.length === 0" class="empty-hint">
+          暂无会话
+        </p>
       </nav>
     </aside>
 
     <section class="chat-main">
       <header class="assistant-header">
         <div>
-          <h1>前端学习助手</h1>
-          <p>在线 · Vue3 / Vite / 前端工程化</p>
+          <h1>{{ chatStore.currentConversation?.title || 'LLM-Agent对话平台' }}</h1>
+          <p>当前阶段仅保存用户消息，AI 回复将在下一阶段接入。</p>
         </div>
-        <span class="backend-status" :class="healthStatus">
-          {{ healthStatusText }}
-        </span>
       </header>
 
       <div class="message-list">
+        <p v-if="chatStore.messagesLoading" class="empty-hint">正在加载消息...</p>
+        <p
+          v-else-if="chatStore.currentConversationId && chatStore.messages.length === 0"
+          class="empty-hint"
+        >
+          还没有消息
+        </p>
+        <p v-else-if="!chatStore.currentConversationId" class="empty-hint">
+          点击“新建会话”开始聊天
+        </p>
+
         <article
-          v-for="message in messages"
+          v-for="message in chatStore.messages"
           :key="message.id"
           class="message-row"
           :class="message.role"
@@ -52,8 +83,14 @@
           placeholder="输入你的问题..."
           resize="none"
           type="textarea"
+          @keydown.enter.exact.prevent="handleSend"
         />
-        <el-button type="primary" :disabled="isSendDisabled">
+        <el-button
+          type="primary"
+          :disabled="isSendDisabled"
+          :loading="sending"
+          @click="handleSend"
+        >
           发送
         </el-button>
       </footer>
@@ -63,65 +100,73 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { getHealth } from '../api/health'
+import { ElMessage } from 'element-plus'
 
+import { useChatStore } from '../stores/chat'
+
+const chatStore = useChatStore()
 const inputText = ref('')
-const healthStatus = ref('loading')
+const sending = ref(false)
 
-const sessions = [
-  {
-    id: 1,
-    title: 'Vue3 入门计划',
-    desc: '组件、响应式与组合式 API',
-    active: true,
-  },
-  {
-    id: 2,
-    title: 'Vite 项目配置',
-    desc: '路由、状态管理与构建',
-    active: false,
-  },
-  {
-    id: 3,
-    title: 'Element Plus 布局',
-    desc: '表单、按钮与工作台界面',
-    active: false,
-  },
-]
+const isSendDisabled = computed(
+  () => inputText.value.trim().length === 0 || sending.value,
+)
 
-const messages = [
-  {
-    id: 1,
-    role: 'assistant',
-    content: '你好，我是前端学习助手。你可以问我 Vue3、Vite、路由或组件设计相关的问题。',
-  },
-  {
-    id: 2,
-    role: 'user',
-    content: '请帮我规划一个 Vue3 AI 聊天工作台的第一阶段页面。',
-  },
-]
-
-const isSendDisabled = computed(() => inputText.value.trim().length === 0)
-
-const healthStatusText = computed(() => {
-  if (healthStatus.value === 'success') {
-    return '后端连接成功'
+function formatDate(value) {
+  if (!value) {
+    return ''
   }
 
-  if (healthStatus.value === 'error') {
-    return '后端连接失败'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+async function handleCreateConversation() {
+  try {
+    await chatStore.addConversation()
+  } catch (error) {
+    ElMessage.error('创建会话失败')
+  }
+}
+
+async function handleDeleteConversation(conversationId) {
+  if (!window.confirm('确定删除这个会话吗？')) {
+    return
   }
 
-  return '正在连接后端...'
-})
+  try {
+    await chatStore.removeConversation(conversationId)
+  } catch (error) {
+    ElMessage.error('删除会话失败')
+  }
+}
+
+async function handleSend() {
+  const content = inputText.value.trim()
+  if (!content || sending.value) {
+    return
+  }
+
+  sending.value = true
+  try {
+    await chatStore.sendUserMessage(content)
+    inputText.value = ''
+  } catch (error) {
+    ElMessage.error('发送失败')
+  } finally {
+    sending.value = false
+  }
+}
 
 onMounted(async () => {
   try {
-    await getHealth()
-    healthStatus.value = 'success'
+    await chatStore.loadConversations()
   } catch (error) {
-    healthStatus.value = 'error'
+    ElMessage.error('加载会话失败')
   }
 })
 </script>
