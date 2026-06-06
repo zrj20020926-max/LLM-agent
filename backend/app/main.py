@@ -17,3 +17,4 @@ app = create_app()
 # 后端的总入口
 # 启动命令 
 # uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# 前一个app是项目app，后面的是main.py中创建的app实例
