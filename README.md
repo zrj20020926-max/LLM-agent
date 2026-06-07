@@ -47,6 +47,7 @@ APP_NAME=AgentDesk
 APP_ENV=development
 CORS_ORIGINS=http://localhost:5173
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/agentdesk
+DEEPSEEK_API_KEY=your_deepseek_api_key
 ```
 
 ## PostgreSQL

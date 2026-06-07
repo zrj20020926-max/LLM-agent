@@ -1,5 +1,5 @@
 <template>
-  <main class="chat-workspace">
+  <main class="message-workspace">
     <aside class="session-sidebar">
       <div class="brand">AgentDesk</div>
 
@@ -7,7 +7,7 @@
         class="new-session-button"
         type="primary"
         plain
-        :loading="chatStore.loading"
+        :loading="messageStore.loading"
         @click="handleCreateConversation"
       >
         新建会话
@@ -15,12 +15,12 @@
 
       <nav class="session-list" aria-label="会话列表">
         <button
-          v-for="conversation in chatStore.conversations"
+          v-for="conversation in messageStore.conversations"
           :key="conversation.id"
           class="session-item"
-          :class="{ active: conversation.id === chatStore.currentConversationId }"
+          :class="{ active: conversation.id === messageStore.currentConversationId }"
           type="button"
-          @click="chatStore.selectConversation(conversation.id)"
+          @click="messageStore.selectConversation(conversation.id)"
         >
           <span class="session-copy">
             <span class="session-title">{{ conversation.title }}</span>
@@ -38,34 +38,34 @@
           </span>
         </button>
 
-        <p v-if="!chatStore.loading && chatStore.conversations.length === 0" class="empty-hint">
+        <p v-if="!messageStore.loading && messageStore.conversations.length === 0" class="empty-hint">
           暂无会话
         </p>
       </nav>
     </aside>
 
-    <section class="chat-main">
+    <section class="message-main">
       <header class="assistant-header">
         <div>
-          <h1>{{ chatStore.currentConversation?.title || 'LLM-Agent对话平台' }}</h1>
-          <p>当前阶段仅保存用户消息，AI 回复将在下一阶段接入。</p>
+          <h1>{{ messageStore.currentConversation?.title || 'LLM-Agent 对话平台' }}</h1>
+          <p>当前阶段接入 DeepSeek 普通流式对话，不启用 tools、RAG 或 Agent 编排。</p>
         </div>
       </header>
 
       <div class="message-list">
-        <p v-if="chatStore.messagesLoading" class="empty-hint">正在加载消息...</p>
+        <p v-if="messageStore.messagesLoading" class="empty-hint">正在加载消息...</p>
         <p
-          v-else-if="chatStore.currentConversationId && chatStore.messages.length === 0"
+          v-else-if="messageStore.currentConversationId && messageStore.messages.length === 0"
           class="empty-hint"
         >
           还没有消息
         </p>
-        <p v-else-if="!chatStore.currentConversationId" class="empty-hint">
+        <p v-else-if="!messageStore.currentConversationId" class="empty-hint">
           点击“新建会话”开始聊天
         </p>
 
         <article
-          v-for="message in chatStore.messages"
+          v-for="message in messageStore.messages"
           :key="message.id"
           class="message-row"
           :class="message.role"
@@ -86,12 +86,16 @@
           @keydown.enter.exact.prevent="handleSend"
         />
         <el-button
+          v-if="!messageStore.generating"
           type="primary"
           :disabled="isSendDisabled"
           :loading="sending"
           @click="handleSend"
         >
           发送
+        </el-button>
+        <el-button v-else type="danger" plain @click="messageStore.stopGenerating">
+          停止
         </el-button>
       </footer>
     </section>
@@ -102,14 +106,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-import { useChatStore } from '../stores/chat'
+import { useMessageStore } from '../stores/message'
 
-const chatStore = useChatStore()
+const messageStore = useMessageStore()
 const inputText = ref('')
 const sending = ref(false)
 
 const isSendDisabled = computed(
-  () => inputText.value.trim().length === 0 || sending.value,
+  () => inputText.value.trim().length === 0 || sending.value || messageStore.generating,
 )
 
 function formatDate(value) {
@@ -127,7 +131,7 @@ function formatDate(value) {
 
 async function handleCreateConversation() {
   try {
-    await chatStore.addConversation()
+    await messageStore.addConversation()
   } catch (error) {
     ElMessage.error('创建会话失败')
   }
@@ -139,7 +143,7 @@ async function handleDeleteConversation(conversationId) {
   }
 
   try {
-    await chatStore.removeConversation(conversationId)
+    await messageStore.removeConversation(conversationId)
   } catch (error) {
     ElMessage.error('删除会话失败')
   }
@@ -147,16 +151,16 @@ async function handleDeleteConversation(conversationId) {
 
 async function handleSend() {
   const content = inputText.value.trim()
-  if (!content || sending.value) {
+  if (!content || sending.value || messageStore.generating) {
     return
   }
 
   sending.value = true
+  inputText.value = ''
   try {
-    await chatStore.sendUserMessage(content)
-    inputText.value = ''
+    await messageStore.sendMessageWithAssistantStream(content)
   } catch (error) {
-    ElMessage.error('发送失败')
+    ElMessage.error(error.message || '发送失败')
   } finally {
     sending.value = false
   }
@@ -164,7 +168,7 @@ async function handleSend() {
 
 onMounted(async () => {
   try {
-    await chatStore.loadConversations()
+    await messageStore.loadConversations()
   } catch (error) {
     ElMessage.error('加载会话失败')
   }

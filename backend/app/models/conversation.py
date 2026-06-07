@@ -6,7 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
-# 区别python对象，这是一个SQLAlchemy model 对象，数据库中也是对应这中对象
+# SQLAlchemy ORM 模型类，映射到数据库表 `conversations`。
+# 类本身是 Python 类，ORM 查询数据库时返回的是该类的实例对象。
 class Conversation(Base):
     __tablename__ = "conversations"
 

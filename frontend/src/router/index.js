@@ -3,12 +3,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/chat',
+    redirect: '/message',
   },
   {
-    path: '/chat',
-    name: 'chat',
-    component: () => import('../views/ChatView.vue'),
+    path: '/message',
+    name: 'message',
+    component: () => import('../views/MessageView.vue'),
   },
 ]
 
