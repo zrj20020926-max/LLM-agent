@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -24,6 +25,11 @@ class MessageStreamAPIError(Exception):
 
 class MessageStreamConfigError(Exception):
     pass
+
+
+MAX_DEEPSEEK_RETRIES = 3
+INITIAL_RETRY_DELAY_SECONDS = 1
+RETRYABLE_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def ensure_conversation_exists(db: Session, conversation_id: int) -> None:
@@ -99,7 +105,7 @@ def stream_deepseek_messages(
 
     response = None
     try:
-        response = urlopen(request, timeout=60)
+        response = open_deepseek_stream_with_retry(request)
         for raw_line in response:
             line = raw_line.decode("utf-8").strip()
             if not line or not line.startswith("data:"):
@@ -130,3 +136,44 @@ def stream_deepseek_messages(
     finally:
         if response is not None:
             response.close()
+
+
+def open_deepseek_stream_with_retry(request: Request):
+    delay_seconds = INITIAL_RETRY_DELAY_SECONDS
+    last_error: HTTPError | URLError | None = None
+
+    for attempt in range(MAX_DEEPSEEK_RETRIES + 1):
+        try:
+            return urlopen(request, timeout=60)
+        except HTTPError as error:
+            last_error = error
+            if not should_retry_http_error(error) or attempt == MAX_DEEPSEEK_RETRIES:
+                # 把当前捕获到的异常原封不动地继续抛出去
+                raise
+
+            # 消费响应体直接读并释放连接资源
+            error.read()
+            logger.warning(
+                "DeepSeek request failed with status %s, retrying in %s seconds",
+                error.code,
+                delay_seconds,
+            )
+        except URLError as error:
+            last_error = error
+            if attempt == MAX_DEEPSEEK_RETRIES:
+                raise
+
+            logger.warning(
+                "DeepSeek network error, retrying in %s seconds: %s",
+                delay_seconds,
+                error.reason,
+            )
+
+        time.sleep(delay_seconds)
+        delay_seconds *= 2
+
+    raise last_error
+
+
+def should_retry_http_error(error: HTTPError) -> bool:
+    return error.code in RETRYABLE_HTTP_STATUS_CODES
