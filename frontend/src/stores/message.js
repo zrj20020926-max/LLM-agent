@@ -152,6 +152,40 @@ export const useMessageStore = defineStore('message', () => {
     streamController = new AbortController()
     generating.value = true
     streamError.value = ''
+    // 定义一个临时字符串缓冲区。后端每次推过来的文本 chunk，不再立刻更新页面，而是先拼到这里。
+    let chunkBuffer = ''
+    // 记录当前是否已经安排了一次 requestAnimationFrame
+    let frameId = null
+
+    // 用来把 buffer 里的内容真正刷到 Vue 响应式状态里
+    const flushBufferedChunks = () => {
+      frameId = null
+      if (!chunkBuffer) {
+        return
+      }
+
+      const content = chunkBuffer
+      chunkBuffer = ''
+      appendAssistantChunk(assistantMessage.id, content)
+    }
+
+    const appendBufferedChunk = (chunk) => {
+      if (!chunk) {
+        return
+      }
+
+      chunkBuffer += chunk
+      if (frameId === null) {
+        frameId = requestAnimationFrame(flushBufferedChunks)
+      }
+    }
+
+    const cancelPendingFlush = () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId)
+        frameId = null
+      }
+    }
 
     try {
       const reader = await streamMessage(conversationId, requestMessages, {
@@ -166,13 +200,15 @@ export const useMessageStore = defineStore('message', () => {
         }
 
         const chunk = decoder.decode(value, { stream: true })
-        appendAssistantChunk(assistantMessage.id, chunk)
+        appendBufferedChunk(chunk)
       }
 
       const tail = decoder.decode()
       if (tail) {
-        appendAssistantChunk(assistantMessage.id, tail)
+        appendBufferedChunk(tail)
       }
+      cancelPendingFlush()
+      flushBufferedChunks()
 
       const finalAssistantMessage = messages.value.find(
         (message) => message.id === assistantMessage.id,
@@ -189,6 +225,8 @@ export const useMessageStore = defineStore('message', () => {
 
       await loadConversations()
     } catch (error) {
+      cancelPendingFlush()
+      flushBufferedChunks()
       if (error.name === 'AbortError') {
         return
       }
@@ -199,6 +237,7 @@ export const useMessageStore = defineStore('message', () => {
       )
       throw error
     } finally {
+      cancelPendingFlush()
       generating.value = false
       streamController = null
     }
