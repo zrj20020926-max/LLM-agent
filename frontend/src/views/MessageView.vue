@@ -70,8 +70,8 @@
           class="message-row"
           :class="message.role"
         >
-          <div class="message-bubble">
-            {{ message.content }}
+          <div class="message-bubble markdown-bubble">
+            <MessageContent :content="message.content" />
           </div>
         </article>
       </div>
@@ -106,6 +106,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
+import MessageContent from '../components/chat/MessageContent.vue'
 import { useMessageStore } from '../stores/message'
 
 const messageStore = useMessageStore()

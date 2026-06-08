@@ -185,6 +185,10 @@ textarea {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
+.message-bubble.markdown-bubble {
+  white-space: normal;
+}
+
 .message-row.assistant .message-bubble {
   color: #1f2937;
   border: 1px solid #e5e7eb;
@@ -194,6 +198,19 @@ textarea {
 .message-row.user .message-bubble {
   color: #ffffff;
   background: #2563eb;
+}
+
+.message-row.user .markdown-content :is(h1, h2, h3, h4, a, code) {
+  color: inherit;
+}
+
+.message-row.user .markdown-content :not(pre) > code {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.message-row.user .markdown-content blockquote {
+  color: rgba(255, 255, 255, 0.86);
+  border-left-color: rgba(255, 255, 255, 0.38);
 }
 
 .message-row.system .message-bubble,
