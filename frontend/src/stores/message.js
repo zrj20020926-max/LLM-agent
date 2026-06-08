@@ -28,8 +28,13 @@ export const useMessageStore = defineStore('message', () => {
       ) || null,
   )
 
+  function clearError() {
+    streamError.value = ''
+  }
+
   async function loadConversations() {
     loading.value = true
+    clearError()
     try {
       conversations.value = await getConversations()
       const savedId = Number(localStorage.getItem(CURRENT_CONVERSATION_KEY))
@@ -45,12 +50,16 @@ export const useMessageStore = defineStore('message', () => {
         messages.value = []
         localStorage.removeItem(CURRENT_CONVERSATION_KEY)
       }
+    } catch (error) {
+      streamError.value = error.message || '会话加载失败'
+      throw error
     } finally {
       loading.value = false
     }
   }
 
   async function addConversation() {
+    clearError()
     const conversation = await createConversation({ title: '新建会话' })
     conversations.value = [conversation, ...conversations.value]
     await selectConversation(conversation.id)
@@ -58,6 +67,7 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   async function renameConversation(conversationId, title) {
+    clearError()
     const conversation = await updateConversation(conversationId, { title })
     conversations.value = conversations.value.map((item) =>
       item.id === conversation.id ? conversation : item,
@@ -66,6 +76,7 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   async function removeConversation(conversationId) {
+    clearError()
     await deleteConversation(conversationId)
     conversations.value = conversations.value.filter(
       (conversation) => conversation.id !== conversationId,
@@ -84,6 +95,7 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   async function selectConversation(conversationId) {
+    clearError()
     currentConversationId.value = conversationId
     localStorage.setItem(CURRENT_CONVERSATION_KEY, String(conversationId))
     await loadMessages(conversationId)
@@ -96,14 +108,19 @@ export const useMessageStore = defineStore('message', () => {
     }
 
     messagesLoading.value = true
+    clearError()
     try {
       messages.value = await getMessages(conversationId)
+    } catch (error) {
+      streamError.value = error.message || '消息加载失败'
+      throw error
     } finally {
       messagesLoading.value = false
     }
   }
 
   async function sendUserMessage(content) {
+    clearError()
     let conversationId = currentConversationId.value
     if (!conversationId) {
       const conversation = await addConversation()
@@ -120,6 +137,7 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   async function sendMessageWithAssistantStream(content) {
+    clearError()
     let conversationId = currentConversationId.value
     if (!conversationId) {
       const conversation = await addConversation()
@@ -151,7 +169,6 @@ export const useMessageStore = defineStore('message', () => {
 
     streamController = new AbortController()
     generating.value = true
-    streamError.value = ''
     // 定义一个临时字符串缓冲区。后端每次推过来的文本 chunk，不再立刻更新页面，而是先拼到这里。
     let chunkBuffer = ''
     // 记录当前是否已经安排了一次 requestAnimationFrame
@@ -164,9 +181,9 @@ export const useMessageStore = defineStore('message', () => {
         return
       }
 
-      const content = chunkBuffer
+      const nextContent = chunkBuffer
       chunkBuffer = ''
-      appendAssistantChunk(assistantMessage.id, content)
+      appendAssistantChunk(assistantMessage.id, nextContent)
     }
 
     const appendBufferedChunk = (chunk) => {
@@ -231,7 +248,7 @@ export const useMessageStore = defineStore('message', () => {
         return
       }
 
-      streamError.value = error.message || 'DeepSeek stream failed'
+      streamError.value = error.message || 'AI 回复生成失败'
       messages.value = messages.value.filter(
         (message) => message.id !== assistantMessage.id || message.content,
       )
@@ -266,6 +283,7 @@ export const useMessageStore = defineStore('message', () => {
     messagesLoading,
     generating,
     streamError,
+    clearError,
     loadConversations,
     addConversation,
     renameConversation,
