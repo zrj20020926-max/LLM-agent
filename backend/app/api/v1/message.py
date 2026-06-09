@@ -1,3 +1,4 @@
+import json
 from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -95,9 +96,11 @@ def stream_message(
     # 定义流式生成器函数（还得流式返回前端，感觉不如直接前端调大模型了...）
     def content_stream():
         if first_chunk:
+            save_tool_call_event(db, conversation_id, first_chunk)
             yield first_chunk
         try:
             for chunk in stream:
+                save_tool_call_event(db, conversation_id, chunk)
                 yield chunk
         except MessageStreamAPIError as error:
             yield f"\n[DeepSeek error] {error.message}"
@@ -105,5 +108,31 @@ def stream_message(
     # StreamingResponse 会边生成边发送内容
     return StreamingResponse(
         content_stream(),
-        media_type="text/plain; charset=utf-8",
+        media_type="application/x-ndjson; charset=utf-8",
+    )
+
+
+def save_tool_call_event(db: Session, conversation_id: int, chunk: str) -> None:
+    try:
+        event = json.loads(chunk)
+    except json.JSONDecodeError:
+        return
+
+    if event.get("type") != "tool_call":
+        return
+
+    message_service.create_message(
+        db,
+        conversation_id,
+        MessageCreate(
+            role="tool",
+            content=json.dumps(
+                {
+                    "name": event.get("name"),
+                    "arguments": event.get("arguments"),
+                    "result": event.get("result"),
+                },
+                ensure_ascii=False,
+            ),
+        ),
     )

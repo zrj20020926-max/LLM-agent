@@ -327,6 +327,60 @@ textarea {
   height: 40px;
 }
 
+.tool-sidebar {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 18px;
+  overflow-y: auto;
+  border-left: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.tool-sidebar-title {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.tool-empty {
+  padding: 10px 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.tool-call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-call-card {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.tool-call-name {
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tool-call-card pre {
+  overflow-x: auto;
+  margin: 8px 0 0;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 720px) {
   .session-sidebar {
     flex-basis: 220px;
@@ -354,5 +408,9 @@ textarea {
 
   .message-bubble {
     max-width: 88%;
+  }
+
+  .tool-sidebar {
+    display: none;
   }
 }

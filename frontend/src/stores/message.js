@@ -19,6 +19,7 @@ export const useMessageStore = defineStore('message', () => {
   const messagesLoading = ref(false)
   const generating = ref(false)
   const streamError = ref('')
+  const toolCalls = ref([])
   let streamController = null
 
   const currentConversation = computed(
@@ -96,6 +97,7 @@ export const useMessageStore = defineStore('message', () => {
 
   async function selectConversation(conversationId) {
     clearError()
+    toolCalls.value = []
     currentConversationId.value = conversationId
     localStorage.setItem(CURRENT_CONVERSATION_KEY, String(conversationId))
     await loadMessages(conversationId)
@@ -104,13 +106,18 @@ export const useMessageStore = defineStore('message', () => {
   async function loadMessages(conversationId = currentConversationId.value) {
     if (!conversationId) {
       messages.value = []
+      toolCalls.value = []
       return
     }
 
     messagesLoading.value = true
     clearError()
     try {
-      messages.value = await getMessages(conversationId)
+      const loadedMessages = await getMessages(conversationId)
+      messages.value = loadedMessages.filter((message) => message.role !== 'tool')
+      toolCalls.value = loadedMessages
+        .filter((message) => message.role === 'tool')
+        .map((message) => parseToolMessage(message))
     } catch (error) {
       streamError.value = error.message || '消息加载失败'
       throw error
@@ -204,6 +211,43 @@ export const useMessageStore = defineStore('message', () => {
       }
     }
 
+    let lineBuffer = ''
+    const handleStreamLine = (line) => {
+      if (!line.trim()) {
+        return
+      }
+
+      let event
+      try {
+        event = JSON.parse(line)
+      } catch {
+        appendBufferedChunk(line)
+        return
+      }
+
+      if (event.type === 'content') {
+        appendBufferedChunk(event.content)
+      } else if (event.type === 'tool_call') {
+        toolCalls.value = [
+          ...toolCalls.value,
+          {
+            id: `${Date.now()}-${toolCalls.value.length}`,
+            name: event.name,
+            arguments: event.arguments,
+            result: event.result,
+            created_at: new Date().toISOString(),
+          },
+        ]
+      }
+    }
+
+    const handleStreamText = (text) => {
+      lineBuffer += text
+      const lines = lineBuffer.split('\n')
+      lineBuffer = lines.pop() || ''
+      lines.forEach(handleStreamLine)
+    }
+
     try {
       const reader = await streamMessage(conversationId, requestMessages, {
         signal: streamController.signal,
@@ -216,13 +260,16 @@ export const useMessageStore = defineStore('message', () => {
           break
         }
 
-        const chunk = decoder.decode(value, { stream: true })
-        appendBufferedChunk(chunk)
+        handleStreamText(decoder.decode(value, { stream: true }))
       }
 
       const tail = decoder.decode()
       if (tail) {
-        appendBufferedChunk(tail)
+        handleStreamText(tail)
+      }
+      if (lineBuffer) {
+        handleStreamLine(lineBuffer)
+        lineBuffer = ''
       }
       cancelPendingFlush()
       flushBufferedChunks()
@@ -268,6 +315,27 @@ export const useMessageStore = defineStore('message', () => {
     )
   }
 
+  function parseToolMessage(message) {
+    try {
+      const payload = JSON.parse(message.content)
+      return {
+        id: message.id,
+        name: payload.name,
+        arguments: payload.arguments,
+        result: payload.result,
+        created_at: message.created_at,
+      }
+    } catch {
+      return {
+        id: message.id,
+        name: 'tool',
+        arguments: '{}',
+        result: message.content,
+        created_at: message.created_at,
+      }
+    }
+  }
+
   function stopGenerating() {
     if (streamController) {
       streamController.abort()
@@ -283,6 +351,7 @@ export const useMessageStore = defineStore('message', () => {
     messagesLoading,
     generating,
     streamError,
+    toolCalls,
     clearError,
     loadConversations,
     addConversation,

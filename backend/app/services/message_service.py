@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from app.core.config import settings
 from app.models.message import Message
 from app.schemas.message import MessageCreate
 from app.services.conversation_service import get_conversation_or_raise
+from app.services.tool_service import TOOLS_SCHEMA, execute_tool
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,9 @@ def create_message(
     db.refresh(message)
     return message
 
-
+# 如果模型直接回答：边收到边 yield 给前端，如果模型要调用工具：收集 tool_calls
+# 后端执行工具，把工具结果再发给 DeepSeek，DeepSeek 基于工具结果生成最终回答
+# 继续流式返回给前端
 def stream_deepseek_messages(
     messages: list[MessageCreate],
     api_key: str | None = None,
@@ -78,12 +82,122 @@ def stream_deepseek_messages(
 
     deepseek_base_url = (base_url or settings.DEEPSEEK_BASE_URL).rstrip("/")
     deepseek_model = model or settings.DEEPSEEK_MODEL
+    request_messages = [message.model_dump() for message in messages]
+    # 组装第一次请求 DeepSeek 的 payload
     payload = {
         "model": deepseek_model,
-        # model_dump把一个模型对象转换成 普通 Python 字典
-        "messages": [message.model_dump() for message in messages],
+        "messages": request_messages,
+        "stream": True,
+        "tools": TOOLS_SCHEMA,
+        "tool_choice": choose_tool_choice(request_messages),
+    }
+
+    # 用来收集工具调用，因为流式返回时，工具调用参数不是一次性完整返回的
+    tool_calls: dict[int, dict] = {}
+
+    for chunk in stream_deepseek_payload(payload, deepseek_api_key, deepseek_base_url):
+        delta = chunk.get("choices", [{}])[0].get("delta", {})
+        content = delta.get("content")
+        if content:
+            # 如果有普通文本，直接返回给前端
+            yield stream_event("content", content=content)
+
+        for tool_call_delta in delta.get("tool_calls") or []:
+            index = tool_call_delta.get("index", 0)
+            tool_call = tool_calls.setdefault(
+                index,
+                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+            )
+            if tool_call_delta.get("id"):
+                tool_call["id"] = tool_call_delta["id"]
+            if tool_call_delta.get("type"):
+                tool_call["type"] = tool_call_delta["type"]
+
+            function_delta = tool_call_delta.get("function") or {}
+            if function_delta.get("name"):
+                tool_call["function"]["name"] += function_delta["name"]
+            if function_delta.get("arguments"):
+                tool_call["function"]["arguments"] += function_delta["arguments"]
+
+    if not tool_calls:
+        return
+
+    ordered_tool_calls = [tool_calls[index] for index in sorted(tool_calls)]
+    tool_messages = []
+    for tool_call in ordered_tool_calls:
+        name = tool_call["function"]["name"]
+        arguments = tool_call["function"]["arguments"]
+        result = execute_tool(name, arguments)
+        yield stream_event(
+            "tool_call",
+            name=name,
+            arguments=arguments,
+            result=result,
+        )
+        tool_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": result,
+            }
+        )
+
+    followup_payload = {
+        "model": deepseek_model,
+        "messages": [
+            *request_messages,
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": ordered_tool_calls,
+            },
+            *tool_messages,
+        ],
         "stream": True,
     }
+
+    for chunk in stream_deepseek_payload(
+        followup_payload,
+        deepseek_api_key,
+        deepseek_base_url,
+    ):
+        delta = chunk.get("choices", [{}])[0].get("delta", {})
+        content = delta.get("content")
+        if content:
+            yield stream_event("content", content=content)
+
+
+def stream_event(event_type: str, **payload) -> str:
+    return json.dumps({"type": event_type, **payload}, ensure_ascii=False) + "\n"
+
+
+def choose_tool_choice(messages: list[dict]) -> str | dict:
+    latest_user_message = next(
+        (message["content"] for message in reversed(messages) if message["role"] == "user"),
+        "",
+    )
+
+    # 如果用户消息里出现了类似 123+456、10 * 5 这样的数学表达式，就自动选择 calculator 工具
+    if re.search(r"\d+\s*[\+\-\*/%]\s*\d+", latest_user_message):
+        return {
+            "type": "function",
+            "function": {"name": "calculator"},
+        }
+
+    if any(keyword in latest_user_message for keyword in ("几点", "现在时间", "当前时间", "time")):
+        return {
+            "type": "function",
+            "function": {"name": "get_current_time"},
+        }
+
+    return "auto"
+
+# 向大模型发送请求，返回一个yield的生成器
+def stream_deepseek_payload(
+    payload: dict,
+    deepseek_api_key: str,
+    deepseek_base_url: str,
+) -> Iterator[dict]:
     request = Request(
         f"{deepseek_base_url}/chat/completions",
         # json.dumps() 把 Python dict 转成 JSON 字符串
@@ -121,10 +235,7 @@ def stream_deepseek_messages(
                 logger.warning("Failed to parse DeepSeek stream chunk: %s", data)
                 continue
 
-            delta = chunk.get("choices", [{}])[0].get("delta", {})
-            content = delta.get("content")
-            if content:
-                yield content
+            yield chunk
     except GeneratorExit:
         logger.info("Client disconnected from message stream")
         raise

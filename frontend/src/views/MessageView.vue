@@ -129,6 +129,24 @@
         </el-button>
       </footer>
     </section>
+
+    <aside class="tool-sidebar">
+      <div class="tool-sidebar-title">Tool Calls</div>
+      <div v-if="messageStore.toolCalls.length === 0" class="tool-empty">
+        No tool calls
+      </div>
+      <div v-else class="tool-call-list">
+        <article
+          v-for="toolCall in messageStore.toolCalls"
+          :key="toolCall.id"
+          class="tool-call-card"
+        >
+          <div class="tool-call-name">{{ toolCall.name }}</div>
+          <pre>args: {{ formatToolPayload(toolCall.arguments) }}</pre>
+          <pre>result: {{ formatToolPayload(toolCall.result) }}</pre>
+        </article>
+      </div>
+    </aside>
   </main>
 </template>
 
@@ -237,6 +255,18 @@ function isPendingAssistantMessage(message) {
     String(message.id).startsWith('stream-') &&
     message.content.length === 0
   )
+}
+
+function formatToolPayload(value) {
+  if (!value) {
+    return '{}'
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 async function scrollToLatestMessage() {
